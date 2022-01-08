@@ -22,20 +22,21 @@ const hashImages = true;
 
 const layerConfigurations = [
   {
-    growEditionSizeTo: 6767,
+    growEditionSizeTo: 11,
     // namePrefix: "Monkey", Use to add a name to Metadata `name:`
     layersOrder: [
-      { name: "Background" },
-      { name: "Base" },
-      { name: "Eyes" },
-      { name: "Mouth" },
-      { name: "Nose" },
-      { name: "Clothes" },
-      { name: "Glasses" },
+      {
+        name: "Back Accessory",
+        // options: {
+        //   bypassDNA: true,
+        // },
+      },
       { name: "Head" },
-      { name: "Ears" },
-      { name: "Cigar" },
-      { name: "Neck" },
+      { name: "Clothes" },
+      { name: "Eyes" },
+      { name: "Hair" },
+      { name: "Head Accessory" },
+      { name: "Shirt Accessories" },
     ],
   },
   // {
@@ -61,45 +62,6 @@ const incompatible = {
   //   Red: ["Dark Long"],
   //   // directory incompatible with directory example
   //   White: ["rare-Pink-Pompadour"],
-       blue_zombie: ["RedAlien", "PurpleAlien", "Alien", "RedHuman", 
-                    "Human", "PurpleHuman", "RedElf", "PurpleElf", 
-                    "Elf", "Angry", "RedAngry", "PurpleAngry", "Furious",
-                    "RedFurious", "PurpleFurious", "Wonder","RedWonder",
-                    "PurpleWonder", "Annoyed", "RedAnnoyed", "PurpleAnnoyed",
-                    "Easy", "Hungry", "RedHungry", "PurpleHungry", "Pig",
-                    "RedPig", "PurplePig", "Long", "RedLong", "PurpleLong",
-                    "Goblin", "RedGoblin", "PurpleGoblin"
-                  ],
-      
-        zombie: [ "RedAlien", "PurpleAlien", "BlueAlien", "RedHuman", 
-                  "BlueHuman", "PurpleHuman", "RedElf", "PurpleElf", 
-                  "BlueElf", "BlueAngry", "RedAngry", "PurpleAngry", "BlueFurious",
-                  "RedFurious", "PurpleFurious", "BlueWonder","RedWonder",
-                  "PurpleWonder", "BlueAnnoyed", "RedAnnoyed", "PurpleAnnoyed",
-                  "Easy", "BlueHungry", "RedHungry", "PurpleHungry", "BluePig",
-                  "RedPig", "PurplePig", "BlueLong", "RedLong", "PurpleLong",
-                  "BlueGoblin", "RedGoblin", "PurpleGoblin"
-              ],  
-              
-        red_zombie: [ "Alien", "PurpleAlien", "BlueAlien", "Human", 
-        "BlueHuman", "PurpleHuman", "Elf", "PurpleElf", 
-        "BlueElf", "BlueAngry", "Angry", "PurpleAngry", "BlueFurious",
-        "Furious", "PurpleFurious", "BlueWonder","Wonder",
-        "PurpleWonder", "BlueAnnoyed", "Annoyed", "PurpleAnnoyed",
-        "Easy", "BlueHungry", "Hungry", "PurpleHungry", "BluePig",
-        "Pig", "PurplePig", "BlueLong", "Long", "PurpleLong",
-        "BlueGoblin", "Goblin", "PurpleGoblin"
-    ],
-    
-    purple_zombie: [ "RedAlien", "Alien", "BlueAlien", "RedHuman", 
-    "BlueHuman", "PurpleHuman", "RedElf", "Elf", 
-    "BlueElf", "BlueAngry", "RedAngry", "Angry", "BlueFurious",
-    "RedFurious", "Furious", "BlueWonder","RedWonder",
-    "Wonder", "BlueAnnoyed", "RedAnnoyed", "Annoyed",
-    "Easy", "BlueHungry", "RedHungry", "Hungry", "BluePig",
-    "RedPig", "Pig", "BlueLong", "RedLong", "Long",
-    "BlueGoblin", "RedGoblin", "Goblin"
-],  
 };
 
 /**
@@ -112,7 +74,7 @@ const incompatible = {
  * further in the stack
  */
 const forcedCombinations = {
-  floral: ["MetallicShades", "Golden Sakura"],
+  // floral: ["MetallicShades", "Golden Sakura"],
 };
 
 const shuffleLayerConfigurations = false;
