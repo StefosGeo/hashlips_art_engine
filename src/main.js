@@ -14,36 +14,43 @@ const { createCanvas, loadImage } = require(path.join(
 
 console.log(path.join(basePath, "/src/config.js"));
 const {
-  buildDir,
-  layersDir,
-  format,
-  baseUri,
-  description,
   background,
-  uniqueDnaTorrance,
-  layerConfigurations,
-  rarityDelimiter,
-  shuffleLayerConfigurations,
+  baseUri,
+  buildDir,
   debugLogs,
+  description,
+  emptyLayerName,
   extraAttributes,
   extraMetadata,
-  incompatible,
   forcedCombinations,
-  traitValueOverrides,
-  outputJPEG,
-  emptyLayerName,
-  useRootTraitType,
+  format,
   hashImages,
+  incompatible,
+  layerConfigurations,
+  layersDir,
+  outputJPEG,
+  rarityDelimiter,
+  shuffleLayerConfigurations,
+  startIndex,
+  traitValueOverrides,
+  uniqueDnaTorrance,
+  useRootTraitType,
 } = require(path.join(basePath, "/src/config.js"));
 const canvas = createCanvas(format.width, format.height);
 const ctxMain = canvas.getContext("2d");
 ctxMain.imageSmoothingEnabled = format.smoothing;
 
-var metadataList = [];
-var attributesList = [];
+let metadataList = [];
+let attributesList = [];
 
-var dnaList = new Set();
+// when generating a random background used to add to DNA
+let generatedBackground;
+
+let dnaList = new Set(); // internal+external: list of all files. used for regeneration etc
+let uniqueDNAList = new Set(); // internal: post-filtered dna set for bypassDNA etc.
 const DNA_DELIMITER = "*";
+
+const zflag = /(z-?\d*,)/;
 
 const buildSetup = () => {
   if (fs.existsSync(buildDir)) {
@@ -56,10 +63,13 @@ const buildSetup = () => {
 
 const getRarityWeight = (_path) => {
   // check if there is an extension, if not, consider it a directory
-  const exp = /#(\d*)/;
-  const weight = exp.exec(_path);
-  const weightNumber = weight ? Number(weight[1]) : null;
-  if (!weightNumber || isNaN(weightNumber)) {
+  const exp = /(\d*)/;
+  // use the delimiter from config
+  const parts = _path.split(rarityDelimiter);
+  const weight = exp.exec(parts[parts.length - 1]);
+  const weightNumber = weight[0] ? Number(weight[0]) : -1;
+
+  if (weightNumber < 0 || isNaN(weightNumber)) {
     return "required";
   }
   return weightNumber;
@@ -71,18 +81,22 @@ const cleanDna = (_str) => {
 };
 
 const cleanName = (_str) => {
+  const hasZ = zflag.test(_str);
+
+  const zRemoved = _str.replace(zflag, "");
+
   const extension = /\.[0-9a-zA-Z]+$/;
-  const hasExtension = extension.test(_str);
-  let nameWithoutExtension = hasExtension ? _str.slice(0, -4) : _str;
+  const hasExtension = extension.test(zRemoved);
+  let nameWithoutExtension = hasExtension ? zRemoved.slice(0, -4) : zRemoved;
   var nameWithoutWeight = nameWithoutExtension.split(rarityDelimiter).shift();
   return nameWithoutWeight;
 };
 
-const parseQueryString = (filename) => {
+const parseQueryString = (filename, layer, sublayer) => {
   const query = /\?(.*)\./;
   const querystring = query.exec(filename);
   if (!querystring) {
-    return { blendmode: "source-over", opacity: 1 };
+    return getElementOptions(layer, sublayer);
   }
 
   const layerstyles = querystring[1].split("&").reduce((r, setting) => {
@@ -91,8 +105,12 @@ const parseQueryString = (filename) => {
   }, []);
 
   return {
-    blendmode: layerstyles.blend ? layerstyles.blend : "source-over",
-    opacity: layerstyles.opacity ? layerstyles.opacity / 100 : 1,
+    blendmode: layerstyles.blend
+      ? layerstyles.blend
+      : getElementOptions(layer, sublayer).blendmode,
+    opacity: layerstyles.opacity
+      ? layerstyles.opacity / 100
+      : getElementOptions(layer, sublayer).opacity,
   };
 };
 
@@ -101,7 +119,7 @@ const parseQueryString = (filename) => {
  * @param {Object} input
  */
 const hash = (input) => {
-  const hashable = typeof input === Buffer ? input : JSON.stringify(input);
+  const hashable = typeof input === "string" ? JSON.stringify(input) : input;
   return keccak256(hashable).toString("hex");
 };
 
@@ -118,14 +136,21 @@ const getElementOptions = (layer, sublayer) => {
   let opacity = 1;
   if (layer.sublayerOptions?.[sublayer]) {
     const options = layer.sublayerOptions[sublayer];
+
+    options.bypassDNA !== undefined ? (bypassDNA = options.bypassDNA) : null;
     options.blend !== undefined ? (blendmode = options.blend) : null;
-    options.opacity !== undefined ? (opacity = options.blend) : null;
+    options.opacity !== undefined ? (opacity = options.opacity) : null;
   } else {
     // inherit parent blend mode
     blendmode = layer.blend != undefined ? layer.blend : "source-over";
     opacity = layer.opacity != undefined ? layer.opacity : 1;
   }
   return { blendmode, opacity };
+};
+
+const parseZIndex = (str) => {
+  const z = zflag.exec(str);
+  return z ? parseInt(z[0].match(/-?\d+/)[0]) : null;
 };
 
 const getElements = (path, layer) => {
@@ -141,7 +166,13 @@ const getElements = (path, layer) => {
       const sublayer = !extension.test(i);
       const weight = getRarityWeight(i);
 
-      const { blendmode, opacity } = getElementOptions(layer, name);
+      const { blendmode, opacity } = parseQueryString(i, layer, name);
+      //pass along the zflag to any children
+      const zindex = zflag.exec(i)
+        ? zflag.exec(i)[0]
+        : layer.zindex
+        ? layer.zindex
+        : "";
 
       const element = {
         sublayer,
@@ -152,11 +183,13 @@ const getElements = (path, layer) => {
         name,
         filename: i,
         path: `${path}${i}`,
+        zindex,
       };
+
       if (sublayer) {
         element.path = `${path}${i}`;
         const subPath = `${path}${i}/`;
-        const sublayer = { ...layer, blend: blendmode, opacity };
+        const sublayer = { ...layer, blend: blendmode, opacity, zindex };
         element.elements = getElements(subPath, sublayer);
       }
 
@@ -236,21 +269,24 @@ const layersSetup = (layersOrder) => {
   return layers;
 };
 
-const saveImage = (_editionCount) => {
+const saveImage = (_editionCount, _buildDir, _canvas) => {
   fs.writeFileSync(
-    `${buildDir}/images/${_editionCount}${outputJPEG ? ".jpg" : ".png"}`,
-    canvas.toBuffer(`${outputJPEG ? "image/jpeg" : "image/png"}`)
+    `${_buildDir}/images/${_editionCount}${outputJPEG ? ".jpg" : ".png"}`,
+    _canvas.toBuffer(`${outputJPEG ? "image/jpeg" : "image/png"}`)
   );
 };
 
 const genColor = () => {
   let hue = Math.floor(Math.random() * 360);
   let pastel = `hsl(${hue}, 100%, ${background.brightness})`;
+  // store the background color in the dna
+  generatedBackground = pastel; //TODO: storing in a global var is brittle. could be improved.
   return pastel;
 };
 
-const drawBackground = (canvasContext) => {
-  canvasContext.fillStyle = genColor();
+const drawBackground = (canvasContext, background) => {
+  canvasContext.fillStyle = background.HSL ?? genColor();
+
   canvasContext.fillRect(0, 0, format.width, format.height);
 };
 
@@ -269,7 +305,6 @@ const addMetadata = (_dna, _edition, _prefixData) => {
   }, []);
 
   let tempMetadata = {
-    dna: hash(_dna),
     name: `${_prefix ? _prefix + " " : ""}#${_edition - _offset}`,
     description: description,
     image: `${baseUri}/${_edition}${outputJPEG ? ".jpg" : ".png"}`,
@@ -282,6 +317,7 @@ const addMetadata = (_dna, _edition, _prefixData) => {
   };
   metadataList.push(tempMetadata);
   attributesList = [];
+  return tempMetadata;
 };
 
 const addAttributes = (_element) => {
@@ -312,9 +348,10 @@ const loadLayerImg = async (_layer) => {
   });
 };
 
-const drawElement = (_renderObject, mainCanvas) => {
+const drawElement = (_renderObject) => {
   const layerCanvas = createCanvas(format.width, format.height);
   const layerctx = layerCanvas.getContext("2d");
+  layerctx.imageSmoothingEnabled = format.smoothing;
 
   layerctx.drawImage(
     _renderObject.loadedImage,
@@ -325,7 +362,6 @@ const drawElement = (_renderObject, mainCanvas) => {
   );
 
   addAttributes(_renderObject);
-  mainCanvas.drawImage(layerCanvas, 0, 0, format.width, format.height);
   return layerCanvas;
 };
 
@@ -385,12 +421,15 @@ const filterDNAOptions = (_dna) => {
     if (!querystring) {
       return true;
     }
+    // convert the items in the query string to an object
     const options = querystring[1].split("&").reduce((r, setting) => {
       const keyPairs = setting.split("=");
-      return { ...r, [keyPairs[0]]: keyPairs[1] };
+      //   construct the object →       {bypassDNA: bool}
+      return { ...r, [keyPairs[0].replace("?", "")]: keyPairs[1] };
     }, []);
-
-    return options.bypassDNA;
+    // currently, there is only support for the bypassDNA option,
+    // when bypassDNA is true, return false to omit from .filter
+    return options.bypassDNA === "true" ? false : true;
   });
 
   return filteredDNA.join(DNA_DELIMITER);
@@ -409,12 +448,21 @@ const removeQueryStrings = (_dna) => {
   return _dna.replace(query, "");
 };
 
-const isDnaUnique = (_DnaList, _dna = []) => {
-  return !dnaList.has(_dna);
+/**
+ * determine if the sanitized/filtered DNA string is unique or not by comparing
+ * it to the set of all previously generated permutations.
+ *
+ * @param {String} _dna string
+ * @returns isUnique is true if uniqueDNAList does NOT contain a match,
+ *  false if uniqueDANList.has() is true
+ */
+const isDnaUnique = (_dna = []) => {
+  const filtered = filterDNAOptions(_dna);
+  return !uniqueDNAList.has(filterDNAOptions(_dna));
 };
 
 // expecting to return an array of strings for each _layer_ that is picked,
-// should be a flattened list of all things that are picked randomly AND reqiured
+// should be a flattened list of all things that are picked randomly AND required
 /**
  *
  * @param {Object} layer The main layer, defined in config.layerConfigurations
@@ -422,6 +470,7 @@ const isDnaUnique = (_DnaList, _dna = []) => {
  * @param {Number*} parentId nested parentID, used during recursive calls for sublayers
  * @param {Array*} incompatibleDNA Used to store incompatible layer names while building DNA
  * @param {Array*} forcedDNA Used to store forced layer selection combinations names while building DNA
+ * @param {Int} zIndex Used in the dna string to define a layers stacking order
  *  from the top down
  * @returns Array DNA sequence
  */
@@ -431,7 +480,8 @@ function pickRandomElement(
   parentId,
   incompatibleDNA,
   forcedDNA,
-  bypassDNA
+  bypassDNA,
+  zIndex
 ) {
   let totalWeight = 0;
   // Does this layer include a forcedDNA item? ya? just return it.
@@ -442,7 +492,20 @@ function pickRandomElement(
     debugLogs
       ? console.log(chalk.yellowBright(`Force picking ${forcedPick.name}/n`))
       : null;
-    let dnaString = `${parentId}.${forcedPick.id}:${forcedPick.filename}${bypassDNA}`;
+    if (forcedPick.sublayer) {
+      return dnaSequence.concat(
+        pickRandomElement(
+          forcedPick,
+          dnaSequence,
+          `${parentId}.${forcedPick.id}`,
+          incompatibleDNA,
+          forcedDNA,
+          bypassDNA,
+          zIndex
+        )
+      );
+    }
+    let dnaString = `${parentId}.${forcedPick.id}:${forcedPick.zindex}${forcedPick.filename}${bypassDNA}`;
     return dnaSequence.push(dnaString);
   }
 
@@ -462,20 +525,25 @@ function pickRandomElement(
   if (compatibleLayers.length === 0) {
     debugLogs
       ? console.log(
-          "No compatible layers in the directory, skipping",
-          layer.name
+          chalk.yellow(
+            "No compatible layers in the directory, skipping",
+            layer.name
+          )
         )
       : null;
     return dnaSequence;
   }
+
   compatibleLayers.forEach((element) => {
     // If there is no weight, it's required, always include it
     // If directory has %, that is % chance to enter the dir
     if (element.weight == "required" && !element.sublayer) {
-      let dnaString = `${parentId}.${element.id}:${element.filename}${bypassDNA}`;
+      let dnaString = `${parentId}.${element.id}:${element.zindex}${element.filename}${bypassDNA}`;
       dnaSequence.unshift(dnaString);
       return;
     }
+    // when the current directory is a required folder
+    // and the element in the loop is another folder
     if (element.weight == "required" && element.sublayer) {
       const next = pickRandomElement(
         element,
@@ -483,7 +551,8 @@ function pickRandomElement(
         `${parentId}.${element.id}`,
         incompatibleDNA,
         forcedDNA,
-        bypassDNA
+        bypassDNA,
+        zIndex
       );
     }
     if (element.weight !== "required") {
@@ -537,7 +606,8 @@ function pickRandomElement(
             `${parentId}.${currentLayers[i].id}`,
             incompatibleDNA,
             forcedDNA,
-            bypassDNA
+            bypassDNA,
+            zIndex
           )
         );
       }
@@ -546,7 +616,7 @@ function pickRandomElement(
       if (currentLayers[i].name === emptyLayerName) {
         return dnaSequence;
       }
-      let dnaString = `${parentId}.${currentLayers[i].id}:${currentLayers[i].filename}${bypassDNA}`;
+      let dnaString = `${parentId}.${currentLayers[i].id}:${currentLayers[i].zindex}${currentLayers[i].filename}${bypassDNA}`;
       return dnaSequence.push(dnaString);
     }
   }
@@ -560,17 +630,59 @@ function pickRandomElement(
  * @param {[String]} layers array of dna string sequences
  */
 const sortLayers = (layers) => {
-  return layers.sort((a, b) => {
+  const nestedsort = layers.sort((a, b) => {
     const addressA = a.split(":")[0];
     const addressB = b.split(":")[0];
     return addressA.length - addressB.length;
   });
+
+  let stack = { front: [], normal: [], end: [] };
+  stack = nestedsort.reduce((acc, layer) => {
+    const zindex = parseZIndex(layer);
+    if (!zindex)
+      return { ...acc, normal: [...(acc.normal ? acc.normal : []), layer] };
+    // move negative z into `front`
+    if (zindex < 0)
+      return { ...acc, front: [...(acc.front ? acc.front : []), layer] };
+    // move positive z into `end`
+    if (zindex > 0)
+      return { ...acc, end: [...(acc.end ? acc.end : []), layer] };
+    // make sure front and end are sorted
+    // contat everything back to an ordered array
+  }, stack);
+
+  // sort the normal array
+  stack.normal.sort();
+
+  return sortByZ(stack.front).concat(stack.normal).concat(sortByZ(stack.end));
 };
+
+/** File String sort by zFlag */
+function sortByZ(dnastrings) {
+  return dnastrings.sort((a, b) => {
+    const indexA = parseZIndex(a);
+    const indexB = parseZIndex(b);
+    return indexA - indexB;
+  });
+}
+
+/**
+ * Sorting by index based on the layer.z property
+ * @param {Array } layers selected Image layer objects array
+ */
+function sortZIndex(layers) {
+  return layers.sort((a, b) => {
+    const indexA = parseZIndex(a.zindex);
+    const indexB = parseZIndex(b.zindex);
+    return indexA - indexB;
+  });
+}
 
 const createDna = (_layers) => {
   let dnaSequence = [];
   let incompatibleDNA = [];
   let forcedDNA = [];
+
   _layers.forEach((layer) => {
     const layerSequence = [];
     pickRandomElement(
@@ -579,12 +691,15 @@ const createDna = (_layers) => {
       layer.id,
       incompatibleDNA,
       forcedDNA,
-      layer.bypassDNA ? "?bypassDNA=true" : ""
+      layer.bypassDNA ? "?bypassDNA=true" : "",
+      layer.zindex ? layer.zIndex : ""
     );
     const sortedLayers = sortLayers(layerSequence);
     dnaSequence = [...dnaSequence, [sortedLayers]];
   });
-  const dnaStrand = dnaSequence.flat(2).join(DNA_DELIMITER);
+  const zSortDNA = sortByZ(dnaSequence.flat(2));
+  const dnaStrand = zSortDNA.join(DNA_DELIMITER);
+
   return dnaStrand;
 };
 
@@ -596,7 +711,7 @@ const writeDnaLog = (_data) => {
   fs.writeFileSync(`${buildDir}/_dna.json`, _data);
 };
 
-const saveMetaDataSingleFile = (_editionCount) => {
+const saveMetaDataSingleFile = (_editionCount, _buildDir) => {
   let metadata = metadataList.find((meta) => meta.edition == _editionCount);
   debugLogs
     ? console.log(
@@ -604,7 +719,7 @@ const saveMetaDataSingleFile = (_editionCount) => {
       )
     : null;
   fs.writeFileSync(
-    `${buildDir}/json/${_editionCount}.json`,
+    `${_buildDir}/json/${_editionCount}.json`,
     JSON.stringify(metadata, null, 2)
   );
 };
@@ -631,7 +746,7 @@ function shuffle(array) {
  *
  */
 const paintLayers = (canvasContext, renderObjectArray, layerData) => {
-  debugLogs ? console.log("Clearing canvas") : null;
+  debugLogs ? console.log("\nClearing canvas") : null;
   canvasContext.clearRect(0, 0, format.width, format.height);
 
   const { abstractedIndexes, _background } = layerData;
@@ -643,17 +758,17 @@ const paintLayers = (canvasContext, renderObjectArray, layerData) => {
     canvasContext.globalAlpha = renderObject.layer.opacity;
     canvasContext.globalCompositeOperation = renderObject.layer.blendmode;
     canvasContext.drawImage(
-      drawElement(renderObject, canvasContext),
+      drawElement(renderObject),
       0,
       0,
-      format.weight,
+      format.width,
       format.height
     );
   });
-  console.log("_background.generate", _background.generate);
+
   if (_background.generate) {
     canvasContext.globalCompositeOperation = "destination-over";
-    drawBackground(canvasContext);
+    drawBackground(canvasContext, background);
   }
   debugLogs
     ? console.log("Editions left to create: ", abstractedIndexes)
@@ -677,13 +792,7 @@ const postProcessMetadata = (layerData) => {
   // with the prefix
   let _offset = 0;
   if (layerConfigurations[layerConfigIndex].resetNameIndex) {
-    _offset = layerConfigurations.reduce((acc, layer, index) => {
-      if (index < layerConfigIndex) {
-        acc += layer.growEditionSizeTo;
-        return acc;
-      }
-      return acc;
-    }, 0);
+    _offset = layerConfigurations[layerConfigIndex - 1].growEditionSizeTo;
   }
 
   return {
@@ -693,10 +802,15 @@ const postProcessMetadata = (layerData) => {
   };
 };
 
-const outputFiles = (abstractedIndexes, layerData) => {
+const outputFiles = (
+  abstractedIndexes,
+  layerData,
+  _buildDir = buildDir,
+  _canvas = canvas
+) => {
   const { newDna, layerConfigIndex } = layerData;
   // Save the canvas buffer to file
-  saveImage(abstractedIndexes[0]);
+  saveImage(abstractedIndexes[0], _buildDir, _canvas);
 
   const { _imageHash, _prefix, _offset } = postProcessMetadata(layerData);
 
@@ -706,20 +820,30 @@ const outputFiles = (abstractedIndexes, layerData) => {
     _imageHash,
   });
 
-  saveMetaDataSingleFile(abstractedIndexes[0]);
-  console.log(
-    `Created edition: ${abstractedIndexes[0]}, with DNA: ${hash(newDna)}`
-  );
+  saveMetaDataSingleFile(abstractedIndexes[0], _buildDir);
+  console.log(chalk.cyan(`Created edition: ${abstractedIndexes[0]}`));
 };
 
-const startCreating = async () => {
+const startCreating = async (storedDNA) => {
+  if (storedDNA) {
+    console.log(`using stored dna of ${storedDNA.size}`);
+    dnaList = storedDNA;
+    dnaList.forEach((dna) => {
+      const editionExp = /\d+\//;
+      const dnaWithoutEditionNum = dna.replace(editionExp, "");
+      uniqueDNAList.add(filterDNAOptions(dnaWithoutEditionNum));
+    });
+  }
   let layerConfigIndex = 0;
-  let editionCount = 1;
+  let editionCount = 1; //used for the growEditionSize while loop, not edition number
   let failedCount = 0;
   let abstractedIndexes = [];
   for (
-    let i = 1;
-    i <= layerConfigurations[layerConfigurations.length - 1].growEditionSizeTo;
+    let i = startIndex;
+    i <=
+    startIndex +
+      layerConfigurations[layerConfigurations.length - 1].growEditionSizeTo -
+      1;
     i++
   ) {
     abstractedIndexes.push(i);
@@ -738,7 +862,7 @@ const startCreating = async () => {
       editionCount <= layerConfigurations[layerConfigIndex].growEditionSizeTo
     ) {
       let newDna = createDna(layers);
-      if (isDnaUnique(dnaList, newDna)) {
+      if (isDnaUnique(newDna)) {
         let results = constructLayerToDna(newDna, layers);
         debugLogs ? console.log("DNA:", newDna.split(DNA_DELIMITER)) : null;
         let loadedElements = [];
@@ -746,7 +870,7 @@ const startCreating = async () => {
         const allImages = results.reduce((images, layer) => {
           return [...images, ...layer.selectedElements];
         }, []);
-        allImages.forEach((layer) => {
+        sortZIndex(allImages).forEach((layer) => {
           loadedElements.push(loadLayerImg(layer));
         });
 
@@ -761,11 +885,18 @@ const startCreating = async () => {
           outputFiles(abstractedIndexes, layerData);
         });
 
-        dnaList.add(filterDNAOptions(newDna));
+        // prepend the same output num (abstractedIndexes[0])
+        // to the DNA as the saved files.
+        dnaList.add(
+          `${abstractedIndexes[0]}/${newDna}${
+            generatedBackground ? "___" + generatedBackground : ""
+          }`
+        );
+        uniqueDNAList.add(filterDNAOptions(newDna));
         editionCount++;
         abstractedIndexes.shift();
       } else {
-        console.log("DNA exists!");
+        console.log(chalk.bgRed("DNA exists!"));
         failedCount++;
         if (failedCount >= uniqueDnaTorrance) {
           console.log(
@@ -782,19 +913,22 @@ const startCreating = async () => {
 };
 
 module.exports = {
-  startCreating,
-  DNA_DELIMITER,
-  createDna,
-  constructLayerToDna,
-  isDnaUnique,
-  loadLayerImg,
-  layersSetup,
-  paintLayers,
-  postProcessMetadata,
   addAttributes,
   addMetadata,
   buildSetup,
+  constructLayerToDna,
+  createDna,
+  DNA_DELIMITER,
   getElements,
-  parseQueryString,
   hash,
+  isDnaUnique,
+  layersSetup,
+  loadLayerImg,
+  outputFiles,
+  paintLayers,
+  parseQueryString,
+  postProcessMetadata,
+  sortZIndex,
+  startCreating,
+  writeMetaData,
 };

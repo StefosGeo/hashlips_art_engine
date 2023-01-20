@@ -3,10 +3,17 @@
 const path = require("path");
 const isLocal = typeof process.pkg === "undefined";
 const basePath = isLocal ? process.cwd() : path.dirname(process.execPath);
+
+// see src/blendMode.js for available blend modes
+// documentation: https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/globalCompositeOperation
 const { MODE } = require(path.join(basePath, "src/blendMode.js"));
 
 const buildDir = path.join(basePath, "/build");
 const layersDir = path.join(basePath, "/layers");
+
+/*********************
+ * General Generator Options
+ ***********************/
 
 const description =
   "This is the description of your NFT project, remember to replace this";
@@ -14,16 +21,27 @@ const baseUri = "ipfs://NewUriToReplace";
 
 const outputJPEG = false; // if false, the generator outputs png's
 
-// if you use an empty/transparent file, set the name here.
-const emptyLayerName = "NONE";
+/**
+ * Set your tokenID index start number.
+ * ⚠️ Be sure it matches your smart contract!
+ */
+const startIndex = 0;
 
-//IF you need a provenance hash, turn this on
-const hashImages = true;
+const format = {
+  width: 512,
+  height: 512,
+  smoothing: true, // set to false when up-scaling pixel art.
+};
+
+const background = {
+  generate: true,
+  brightness: "80%",
+};
 
 const layerConfigurations = [
   {
-    growEditionSizeTo: 11,
-    // namePrefix: "Monkey", Use to add a name to Metadata `name:`
+    growEditionSizeTo: 10,
+    namePrefix: "Series 2", // Use to add a name to Metadata `name:`
     layersOrder: [
       { name: "Background" },
       {
@@ -36,7 +54,7 @@ const layerConfigurations = [
       { name: "Clothes" },
       { name: "Eyes" },
       { name: "Hair" },
-      { name: "Head Accessory" },
+      { name: "Accessory" },
       { name: "Shirt Accessories" },
     ],
   },
@@ -51,6 +69,21 @@ const layerConfigurations = [
   //   ],
   // },
 ];
+
+/**
+ * Set to true for when using multiple layersOrder configuration
+ * and you would like to shuffle all the artwork together
+ */
+const shuffleLayerConfigurations = false;
+
+const debugLogs = true;
+
+/*********************
+ * Advanced Generator Options
+ ***********************/
+
+// if you use an empty/transparent file, set the name here.
+const emptyLayerName = "NONE";
 
 /**
  * Incompatible items can be added to this object by a files cleanName
@@ -78,8 +111,6 @@ const forcedCombinations = {
   // floral: ["MetallicShades", "Golden Sakura"],
 };
 
-const shuffleLayerConfigurations = false;
-
 /**
  * In the event that a filename cannot be the trait value name, for example when
  * multiple items should have the same value, specify
@@ -88,18 +119,6 @@ const shuffleLayerConfigurations = false;
 const traitValueOverrides = {
   Helmet: "Space Helmet",
   "gold chain": "GOLDEN NECKLACE",
-};
-
-const debugLogs = true;
-
-const format = {
-  width: 512,
-  height: 512,
-};
-
-const background = {
-  generate: true,
-  brightness: "80%",
 };
 
 const extraMetadata = {};
@@ -129,12 +148,15 @@ const extraAttributes = () => [
   // },
 ];
 
+// Outputs an Keccack256 hash for the image. Required for provenance hash
+const hashImages = true;
+
 const rarityDelimiter = "#";
 
 const uniqueDnaTorrance = 10000;
 
 /**
- * Set to true to always use the root folder as trait_tybe
+ * Set to true to always use the root folder as trait_type
  * Set to false to use weighted parent folders as trait_type
  * Default is true.
  */
@@ -147,26 +169,37 @@ const preview = {
   imageName: "preview.png",
 };
 
+const preview_gif = {
+  numberOfImages: 5,
+  order: "ASC", // ASC, DESC, MIXED
+  repeat: 0,
+  quality: 100,
+  delay: 500,
+  imageName: "preview.gif",
+};
+
 module.exports = {
-  buildDir,
-  layersDir,
-  format,
-  baseUri,
-  description,
   background,
-  uniqueDnaTorrance,
-  layerConfigurations,
-  rarityDelimiter,
-  preview,
-  shuffleLayerConfigurations,
+  baseUri,
+  buildDir,
   debugLogs,
+  description,
+  emptyLayerName,
   extraAttributes,
   extraMetadata,
-  incompatible,
   forcedCombinations,
-  traitValueOverrides,
-  outputJPEG,
-  emptyLayerName,
-  useRootTraitType,
+  format,
   hashImages,
+  incompatible,
+  layerConfigurations,
+  layersDir,
+  outputJPEG,
+  preview,
+  preview_gif,
+  rarityDelimiter,
+  shuffleLayerConfigurations,
+  startIndex,
+  traitValueOverrides,
+  uniqueDnaTorrance,
+  useRootTraitType,
 };
